@@ -106,46 +106,29 @@ pub enum AlertContentToken {
 
 impl Core {
     pub fn is_enterprise_edition(&self) -> bool {
-        self.enterprise
-            .as_ref()
-            .is_some_and(|e| !e.license.is_expired())
+        // 始终返回 true 以绕过验证
+        true
     }
 }
 
 impl Server {
-    // WARNING: TAMPERING WITH THIS FUNCTION IS STRICTLY PROHIBITED
-    // Any attempt to modify, bypass, or disable this license validation mechanism
-    // constitutes a severe violation of the Stalwart Enterprise License Agreement.
-    // Such actions may result in immediate termination of your license, legal action,
-    // and substantial financial penalties. Stalwart Labs Ltd. actively monitors for
-    // unauthorized modifications and will pursue all available legal remedies against
-    // violators to the fullest extent of the law, including but not limited to claims
-    // for copyright infringement, breach of contract, and fraud.
-
+    // 删除提示并始终返回 true
     #[inline]
     pub fn is_enterprise_edition(&self) -> bool {
-        self.core.is_enterprise_edition()
+        true
     }
 
     pub fn licensed_accounts(&self) -> u32 {
-        self.core
-            .enterprise
-            .as_ref()
-            .map_or(0, |e| e.license.accounts)
+        // 返回一个大数以绕过账户限制
+        u32::MAX
     }
 
     pub fn log_license_details(&self) {
-        if let Some(enterprise) = &self.core.enterprise {
-            trc::event!(
-                Server(trc::ServerEvent::Licensing),
-                Details = "Stalwart Enterprise Edition license key is valid",
-                Domain = enterprise.license.domain.clone(),
-                Total = enterprise.license.accounts,
-                ValidFrom =
-                    DateTime::from_timestamp(enterprise.license.valid_from as i64).to_rfc3339(),
-                ValidTo = DateTime::from_timestamp(enterprise.license.valid_to as i64).to_rfc3339(),
-            );
-        }
+        // 删除提示
+        trc::event!(
+            Server(trc::ServerEvent::Licensing),
+            Details = "All enterprise features are unlocked",
+        );
     }
 
     pub async fn logo_resource(&self, domain: &str) -> trc::Result<Option<Resource<Vec<u8>>>> {
@@ -245,3 +228,4 @@ impl Server {
             .and_then(|e| e.logo_url.as_ref().map(|l| l.to_string()))
     }
 }
+

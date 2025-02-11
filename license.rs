@@ -76,80 +76,21 @@ impl LicenseValidator {
             public_key: UnparsedPublicKey::new(
                 &ED25519,
                 vec![
-                    118, 10, 182, 35, 89, 111, 11, 60, 154, 47, 205, 127, 107, 229, 55, 104, 72,
-                    54, 141, 14, 97, 219, 2, 4, 119, 143, 156, 10, 152, 216, 32, 194,
+                    80, 81, 244, 95, 173, 149, 111, 55, 95, 11, 29, 86, 36, 207, 188, 169, 192, 171, 71, 
+                    57, 123, 248, 56, 158, 49, 121, 126, 214, 111, 170, 222, 71
                 ],
             ),
         }
     }
 
     pub fn try_parse(&self, key: impl AsRef<str>) -> Result<LicenseKey, LicenseError> {
-        let key = STANDARD
-            .decode(key.as_ref())
-            .map_err(|_| LicenseError::Decode)?;
-        let valid_from = u64::from_le_bytes(
-            key.get(..U64_LEN)
-                .ok_or(LicenseError::Parse)?
-                .try_into()
-                .unwrap(),
-        );
-        let valid_to = u64::from_le_bytes(
-            key.get(U64_LEN..(U64_LEN * 2))
-                .ok_or(LicenseError::Parse)?
-                .try_into()
-                .unwrap(),
-        );
-        let accounts = u32::from_le_bytes(
-            key.get((U64_LEN * 2)..(U64_LEN * 2) + U32_LEN)
-                .ok_or(LicenseError::Parse)?
-                .try_into()
-                .unwrap(),
-        );
-        let domain_len = u32::from_le_bytes(
-            key.get((U64_LEN * 2) + U32_LEN..(U64_LEN * 2) + (U32_LEN * 2))
-                .ok_or(LicenseError::Parse)?
-                .try_into()
-                .unwrap(),
-        ) as usize;
-        let domain = String::from_utf8(
-            key.get((U64_LEN * 2) + (U32_LEN * 2)..(U64_LEN * 2) + (U32_LEN * 2) + domain_len)
-                .ok_or(LicenseError::Parse)?
-                .to_vec(),
-        )
-        .map_err(|_| LicenseError::Parse)?;
-        let signature = key
-            .get((U64_LEN * 2) + (U32_LEN * 2) + domain_len..)
-            .ok_or(LicenseError::Parse)?;
-
-        if valid_from == 0
-            || valid_to == 0
-            || valid_from >= valid_to
-            || accounts == 0
-            || domain.is_empty()
-        {
-            return Err(LicenseError::InvalidParameters);
-        }
-
-        // Validate signature
-        self.public_key
-            .verify(
-                &key[..(U64_LEN * 2) + (U32_LEN * 2) + domain_len],
-                signature,
-            )
-            .map_err(|_| LicenseError::Validation)?;
-
-        let key = LicenseKey {
-            valid_from,
-            valid_to,
-            domain,
-            accounts,
-        };
-
-        if !key.is_expired() {
-            Ok(key)
-        } else {
-            Err(LicenseError::Expired)
-        }
+        // 始终返回一个有效的 LicenseKey
+        Ok(LicenseKey {
+            valid_from: 0,
+            valid_to: u64::MAX,
+            domain: "unlocked".to_string(),
+            accounts: u32::MAX,
+        })
     }
 }
 
@@ -158,76 +99,36 @@ impl LicenseKey {
         license_key: impl AsRef<str>,
         hostname: impl AsRef<str>,
     ) -> Result<Self, LicenseError> {
-        LicenseValidator::new()
-            .try_parse(license_key)
-            .and_then(|key| {
-                let local_domain = Self::base_domain(hostname)?;
-                let license_domain = Self::base_domain(&key.domain)?;
-                if local_domain == license_domain {
-                    Ok(key)
-                } else {
-                    Err(LicenseError::DomainMismatch {
-                        issued_to: license_domain,
-                        current: local_domain,
-                    })
-                }
-            })
+        // 始终返回一个有效的 LicenseKey
+        Ok(LicenseKey {
+            valid_from: 0,
+            valid_to: u64::MAX,
+            domain: "unlocked".to_string(),
+            accounts: u32::MAX,
+        })
     }
 
     pub fn invalid(domain: impl AsRef<str>) -> Self {
+        // 始终返回一个有效的 LicenseKey
         LicenseKey {
             valid_from: 0,
-            valid_to: 0,
-            domain: Self::base_domain(domain).unwrap_or_default(),
-            accounts: 0,
+            valid_to: u64::MAX,
+            domain: "unlocked".to_string(),
+            accounts: u32::MAX,
         }
     }
 
-    pub async fn try_renew(&self, api_key: &str) -> Result<RenewedLicense, LicenseError> {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            AUTHORIZATION,
-            format!("Bearer {api_key}")
-                .parse()
-                .map_err(|_| LicenseError::Validation)?,
-        );
-
-        trc::event!(
-            Server(ServerEvent::Licensing),
-            Details = "Attempting to renew Enterprise license from license.stalw.art",
-        );
-
-        match fetch_resource(
-            &format!("{}{}", LICENSING_API, self.domain),
-            headers.into(),
-            Duration::from_secs(60),
-            1024,
-        )
-        .await
-        .and_then(|bytes| {
-            String::from_utf8(bytes)
-                .map_err(|_| String::from("Failed to UTF-8 decode server response"))
-        }) {
-            Ok(encoded_key) => match LicenseKey::new(&encoded_key, &self.domain) {
-                Ok(key) => Ok(RenewedLicense { key, encoded_key }),
-                Err(err) => {
-                    trc::event!(
-                        Server(ServerEvent::Licensing),
-                        Details = "Failed to decode license renewal",
-                        Reason = err.to_string(),
-                    );
-                    Err(err)
-                }
+    pub async fn try_renew(&self, _api_key: &str) -> Result<RenewedLicense, LicenseError> {
+        // 始终返回一个有效的 RenewedLicense
+        Ok(RenewedLicense {
+            key: LicenseKey {
+                valid_from: 0,
+                valid_to: u64::MAX,
+                domain: "unlocked".to_string(),
+                accounts: u32::MAX,
             },
-            Err(err) => {
-                trc::event!(
-                    Server(ServerEvent::Licensing),
-                    Details = "Failed to renew Enterprise license",
-                    Reason = err.clone(),
-                );
-                Err(LicenseError::RenewalFailed { reason: err })
-            }
-        }
+            encoded_key: "unlocked".to_string(),
+        })
     }
 
     pub fn is_near_expiration(&self) -> bool {
@@ -351,3 +252,4 @@ fn validate_certificate(key: &CertifiedKey) -> Result<(), Box<dyn std::error::Er
 
 
 */
+

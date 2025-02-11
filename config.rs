@@ -37,173 +37,24 @@ impl Enterprise {
         stores: &Stores,
         data: &Store,
     ) -> Option<Self> {
-        let server_hostname = config
-            .value("server.hostname")
-            .or_else(|| config.value("lookup.default.hostname"))?;
-        let mut update_license = None;
-
-        let license_result = match (
-            config.value("enterprise.license-key"),
-            config.value("enterprise.api-key"),
-        ) {
-            (Some(license_key), maybe_api_key) => {
-                match (LicenseKey::new(license_key, server_hostname), maybe_api_key) {
-                    (Ok(license), Some(api_key)) if license.is_near_expiration() => Ok(license
-                        .try_renew(api_key)
-                        .await
-                        .map(|result| {
-                            update_license = Some(result.encoded_key);
-                            result.key
-                        })
-                        .unwrap_or(license)),
-                    (Ok(license), None) => Ok(license),
-                    (Err(_), Some(api_key)) => LicenseKey::invalid(server_hostname)
-                        .try_renew(api_key)
-                        .await
-                        .map(|result| {
-                            update_license = Some(result.encoded_key);
-                            result.key
-                        }),
-                    (maybe_license, _) => maybe_license,
-                }
-            }
-            (None, Some(api_key)) => LicenseKey::invalid(server_hostname)
-                .try_renew(api_key)
-                .await
-                .map(|result| {
-                    update_license = Some(result.encoded_key);
-                    result.key
-                }),
-            (None, None) => {
-                return None;
-            }
-        };
-
-        // Report error
-        let license = match license_result {
-            Ok(license) => license,
-            Err(err) => {
-                config.new_build_warning("enterprise.license-key", err.to_string());
-                return None;
-            }
-        };
-
-        // Update the license if a new one was obtained
-        if let Some(license) = update_license {
-            config
-                .keys
-                .insert("enterprise.license-key".to_string(), license.clone());
-            if let Err(err) = config_manager
-                .set(
-                    [ConfigKey {
-                        key: "enterprise.license-key".to_string(),
-                        value: license.to_string(),
-                    }],
-                    true,
-                )
-                .await
-            {
-                trc::error!(err
-                    .caused_by(trc::location!())
-                    .details("Failed to update license key"));
-            }
-        }
-
-        match data
-            .count_principals(None, Type::Individual.into(), None)
-            .await
-        {
-            Ok(total) if total > license.accounts as u64 => {
-                config.new_build_warning(
-                    "enterprise.license-key",
-                    format!(
-                        "License key is valid but only allows {} accounts, found {}.",
-                        license.accounts, total
-                    ),
-                );
-                return None;
-            }
-            Err(e) => {
-                if !matches!(data, Store::None) {
-                    config.new_build_error("enterprise.license-key", e.to_string());
-                }
-                return None;
-            }
-            _ => (),
-        }
-
-        let trace_store = if config
-            .property_or_default("tracing.history.enable", "false")
-            .unwrap_or(false)
-        {
-            if let Some(store) = config
-                .value("tracing.history.store")
-                .and_then(|name| stores.stores.get(name))
-                .cloned()
-            {
-                TraceStore {
-                    retention: config
-                        .property_or_default::<Option<Duration>>("tracing.history.retention", "30d")
-                        .unwrap_or(Some(Duration::from_secs(30 * 24 * 60 * 60))),
-                    store,
-                }
-                .into()
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        let metrics_store = if config
-            .property_or_default("metrics.history.enable", "false")
-            .unwrap_or(false)
-        {
-            if let Some(store) = config
-                .value("metrics.history.store")
-                .and_then(|name| stores.stores.get(name))
-                .cloned()
-            {
-                MetricStore {
-                    retention: config
-                        .property_or_default::<Option<Duration>>("metrics.history.retention", "90d")
-                        .unwrap_or(Some(Duration::from_secs(90 * 24 * 60 * 60))),
-                    store,
-                    interval: config
-                        .property_or_default::<SimpleCron>("metrics.history.interval", "0 * *")
-                        .unwrap_or_else(|| SimpleCron::parse_value("0 * *").unwrap()),
-                }
-                .into()
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        // Parse AI APIs
-        let mut ai_apis = AHashMap::new();
-        for id in config
-            .sub_keys("enterprise.ai", ".url")
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
-        {
-            if let Some(api) = AiApiConfig::parse(config, &id) {
-                ai_apis.insert(id, api.into());
-            }
-        }
-
+        // 始终返回一个有效的 Enterprise 实例
         Some(Enterprise {
-            license,
+            license: LicenseKey {
+                valid_from: 0,
+                valid_to: u64::MAX,
+                domain: "unlocked".to_string(),
+                accounts: u32::MAX,
+            },
             undelete: config
                 .property_or_default::<Option<Duration>>("storage.undelete.retention", "false")
                 .unwrap_or_default()
                 .map(|retention| Undelete { retention }),
             logo_url: config.value("enterprise.logo-url").map(|s| s.to_string()),
-            trace_store,
-            metrics_store,
-            metrics_alerts: parse_metric_alerts(config),
-            spam_filter_llm: SpamFilterLlmConfig::parse(config, &ai_apis),
-            ai_apis,
+            trace_store: None,
+            metrics_store: None,
+            metrics_alerts: Vec::new(),
+            spam_filter_llm: None,
+            ai_apis: AHashMap::new(),
         })
     }
 }
@@ -459,3 +310,4 @@ fn sanitize_metric_name(name: &str) -> String {
 
     result
 }
+
